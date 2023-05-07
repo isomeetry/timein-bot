@@ -49,10 +49,9 @@ function doPost(e) {
     var msg = contents.message;
 
     if (msg.hasOwnProperty('entities') && msg.entities[0].type == 'bot_command') {
-      commandListenerG(text, sender, senderId, chatId, chatIdWithBot);
+      commandListener(text, sender, senderId, chatId, chatIdWithBot);
       legacy_commandListener(chatIdWithBot, text, sender, chatId);
     } else {
-      // might remove/update later
       timeEventListener(chatId, text, senderId, sender);
     }
   } else if (contents.callback_query) {
@@ -63,6 +62,4 @@ function doPost(e) {
 
     callbackDataListener(callbackQuery.data, messageId, sender, senderId);
   }
-
-  
 }
