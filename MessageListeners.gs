@@ -1,14 +1,13 @@
 function callbackDataListener(data = 'w_10:36', messageId, sender, botChatId) {
-  var timeLogSheet = SpreadsheetApp.openById(SSID).getSheetByName(SPREADSHEETS.TIMELOGS);
-  
-  var isFromWfhCheck = data.includes('w_') || data.includes('o_');
+  var isCallbackFromWfh = data.includes('w_') || data.includes('o_');
   var knoxId = getKnoxId(botChatId);
 
-  if (isFromWfhCheck) {
+  if (isCallbackFromWfh) {
+    var TIME_LOG_SHEET = SpreadsheetApp.openById(SSID).getSheetByName(SPREADSHEETS.TIMELOGS);
     var isWfh = data.includes('w_');
     var parsedTimeStr = data.slice((data.indexOf('_') + 1));
 
-    timeLogSheet.appendRow([
+    TIME_LOG_SHEET.appendRow([
       botChatId,
       knoxId,
       sender,
@@ -18,83 +17,94 @@ function callbackDataListener(data = 'w_10:36', messageId, sender, botChatId) {
     ]);
 
     deleteMessage(botChatId, messageId);
-    sendMessage(botChatId, '[ + ' + getDate() + '] Time in logged successfully.');
+    sendMessage(botChatId, generateBotMessageToSender(sender, parsedTimeStr, isWfh, true));
 
     // Change first parameter to GROUP_CHAT_ID when done with testing
-    sendMessage(botChatId, generateBotMessage(knoxId, parsedTimeStr, isWfh, true));
+    sendMessage(botChatId, generateBotMessageToGroup(knoxId, parsedTimeStr, isWfh, true));
   }
 
   return;
 }
 
-function commandListenerG(message = '/time_in', sender = '', senderId = '', groupChatId, botChatId) {
-  var timeLogSheet = SpreadsheetApp.openById(SSID).getSheetByName(SPREADSHEETS.TIMELOGS);
+function commandListener(message = '/time_in 8:30am', sender = '', senderId = '', groupChatId, botChatId) {
   var cmdParams = message.split(' ');
   var commandStr = cmdParams[0] || '';
   var arg1 = cmdParams[1] || '';
-  var isTimeIn = commandStr.includes(COMMANDS.WFH_IN) || commandStr.includes(COMMANDS.ONSITE_IN);
-  var isTimeOut = commandStr.includes(COMMANDS.WFH_OUT) || commandStr.includes(COMMANDS.ONSITE_OUT);
-  var isTimeCommand = isTimeIn || isTimeOut;
-  var isWfh = commandStr.includes(COMMANDS.WFH_IN) || commandStr.includes(COMMANDS.WFH_OUT);
+  var knoxIdFromAdmin = arg1;
+  var timeStr = arg1.length > 0 ? getTimeObjFromText(arg1).time24hr : getTime();
+  var isTimeIn = true;
+  var isWfh = commandStr.includes(COMMANDS.WFH_IN) || commandStr.includes(COMMANDS.WFH_OUT) || 
+    commandStr.includes(COMMANDS.SUPER_ADMIN.GET_TOTAL_WFH_ALL);
 
-  if (isTimeCommand) {
-    var timeStr = arg1.length > 0 ? getTimeObjFromText(arg1).time24hr : getTime();
-    var knoxId = getKnoxId(senderId);
+  var params = {
+    botChatId,
+    groupChatId,
+    isTimeIn,
+    isWfh,
+    senderId,
+    sender,
+    timeStr
+  };
 
-    // @TODO: Append time out on same row as time in for the day 
-    timeLogSheet.appendRow([
-      senderId,
-      knoxId,
-      sender,
-      getDate(),
-      isWfh ? WORK_ARRANGEMENTS.WFH : WORK_ARRANGEMENTS.ONSITE,
-      isTimeIn ? timeStr : '',
-      isTimeOut ? timeStr : '',
-    ]);
+  Logger.log(commandStr);
+  sendMessage(botChatId, commandStr);
 
-    sendMessage(botChatId, generateBotMessage(knoxId, timeStr,isWfh, isTimeIn));
-
-  } else if (commandStr.includes(COMMANDS.TIME_IN)) {
-    var timeStr = arg1.length > 0 ? getTimeObjFromText(arg1).time24hr : getTime();
-
-    sendMessage(botChatId, 'Hi ' + sender + '!%0AYou have <u>timed in</u> at 「<b>'+ timeStr + '</b>🟢」.%0A%0ASelect your work arrangement for today:', { reply_markup: {
-      inline_keyboard: [
-        [{text: '🏠 WFH', 'callback_data': 'w_' + timeStr}],
-        [{text: '🏢 Onsite', 'callback_data': 'o_' + timeStr}],
-      ],
-    } });
-  } else if (commandStr.includes(COMMANDS.TIME_OUT)) {
-      var timeStr = arg1.length > 0 ? getTimeObjFromText(arg1).time24hr : getTime();
-      // var knoxId = getKnoxId(senderId, botChatId);
-
-      // Find if there is time in. If none, ask user to time in first. If yes, find the column where the user timed in  
-      
+  switch(commandStr) {
+    case COMMANDS.TIME_IN:
+      addTimeIn(params);
+      break;
+    case COMMANDS.TIME_OUT:
+      addTimeOut(params);
+      break;
+    case COMMANDS.FORMATS:
+      showFormats(params);
+      break;
+    case COMMANDS.HELP:
+      showHelp(params);
+      break;
+    case COMMANDS.ABOUT:
+      showAbout(params);
+      break;
+    case COMMANDS.MY_TIMESHEET:
+      getTimeSheet(params);
+      break;
+    case COMMANDS.SUPER_ADMIN.GET_TIMESHEET:
+      getTimeSheet({ ...params, knoxIdFromAdmin });
+      break;
+    case COMMANDS.SUPER_ADMIN.GET_TOTAL_WFH_ALL:
+      case COMMANDS.SUPER_ADMIN.GET_TOTAL_ONSITE_ALL:
+      getTotalDaysAll(params);
+      break;
+    default: 
+      break;
   }
 
   return;
 }
 
-function getKnoxId(senderId = 115884270) {
-  var data = readDataFromRange(SPREADSHEETS.USERS, 'A2', 'C20');
-  var knoxId = '-';
-  var knoxIdIndex = 2;
-  var telegramIdIndex = 0;
-
-  data.forEach((user) => {
-    if (senderId.toString() === user[telegramIdIndex].toString()) {
-      knoxId = user[knoxIdIndex];
-    }
-  });
-
-  return knoxId;
-}
-
-function generateBotMessage(knoxId, timeStr, isWfh, isTimeIn) {
+function generateBotMessageToGroup(knoxId, timeStr, isWfh, isTimeIn) {
+  /**
+   * kg.ramos
+   * 🏠◂🟢 08:00
+   * 
+   * kg.ramos
+   * 🏢▸🔴 09:00
+   */
   var emoji = isWfh ? '🏠' : '🏢';
   var type = isTimeIn ? '◂🟢' : '▸🔴';
   var name = ' <b>' + knoxId + '</b> — ';
 
   return emoji + type + name + timeStr;
+}
+
+function generateBotMessageToSender(name, timeStr, isWfh, isTimeIn) {
+  var recordedTimeIn = 'This is recorded';
+  var recordedTimeOut = 'Hi ' + name + ', your time out is recorded.';
+
+  var partingTimeIn = 'Good luck at work today! 😊';
+  var partingTimeOut = isWfh ? 'Have a great rest of your day! 💆' : 'Take care when going home! 👋';
+
+  return (isTimeIn ? recordedTimeIn + partingTimeIn : recordedTimeOut + partingTimeOut);
 }
 
 
@@ -221,36 +231,7 @@ function legacy_commandListener(chatId, text = '', sender = '', sameChatId) {
     );    
   }
 
-  if (text.includes(COMMANDS.WFH_IN) || text.includes(COMMANDS.ONSITE_IN)) {
-    addTimeIn(text);
-  } else if (text.includes(COMMANDS.WFH_OUT) || text.includes(COMMANDS.ONSITE_OUT)) {
-    addTimeOut(text);
-  } 
-
   return;
-}
-
-function addTimeIn(text) {
-  var tableTimeLog = SpreadsheetApp.openById(SSID).getSheetByName(SPREADSHEETS.TIME_LOG);
-
-  var id = 0;
-  var knoxId = '';
-  var timeIn = getTimeObjFromText(getTimeFromText(text)); // @TODO: should be UNIX timestamp
-  var workArrangement = getWorkArrangement(text);
-
-  timeLogSheet.appendRow([
-    id,
-    knoxId,
-    timeIn,
-    '-',
-    workArrangement,
-  ]);
-
-  sendMessage(sameChatId, 'Good luck at work today!');
-}
-
-function addTimeOut() {
-
 }
 
 function timeEventListener(chatId, text = '', senderId = '', sender = '') {
